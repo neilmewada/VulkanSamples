@@ -6,7 +6,13 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake")
 
 set(NAME vulkanExamples)
 
-project(${NAME})
+project(${NAME} LANGUAGES C CXX CUDA)
+
+enable_language(CUDA)
+
+set(CMAKE_CUDA_STANDARD 20)
+set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+set(CMAKE_CUDA_ARCHITECTURES 75)
 
 include_directories(external)
 include_directories(external/glm)

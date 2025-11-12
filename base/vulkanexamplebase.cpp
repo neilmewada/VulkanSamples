@@ -799,6 +799,8 @@ void VulkanExampleBase::submitFrame(bool skipQueueSubmit)
 
 		VkCommandBuffer submitBuffers[2] = { drawCmdBuffers[currentBuffer], transferCmdBuffers[currentBuffer] };
 
+		VkSemaphore semaphores[2] = { renderCompleteSemaphores[currentImageIndex], exportSemaphores[currentImageIndex]};
+
 		const VkPipelineStageFlags waitPipelineStage{ VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
 		VkSubmitInfo submitInfo{
 			.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
@@ -807,8 +809,8 @@ void VulkanExampleBase::submitFrame(bool skipQueueSubmit)
 			.pWaitDstStageMask = &waitPipelineStage,
 			.commandBufferCount = 2,
 			.pCommandBuffers = submitBuffers,
-			.signalSemaphoreCount = 1,
-			.pSignalSemaphores = &renderCompleteSemaphores[currentImageIndex]
+			.signalSemaphoreCount = 2,
+			.pSignalSemaphores = semaphores
 		};
 		VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, waitFences[currentBuffer]));
 	}
@@ -3132,6 +3134,11 @@ void VulkanExampleBase::setupFrameBuffer()
 	offscreenImages.resize(swapChain.images.size());
 	offscreenImageViews.resize(swapChain.images.size());
 	offscreenImageMemories.resize(swapChain.images.size());
+	cudaExportPackets.resize(swapChain.images.size());
+
+	auto vkGetMemoryWin32HandleKHR = PFN_vkGetMemoryWin32HandleKHR(vkGetDeviceProcAddr(device, "vkGetMemoryWin32HandleKHR"));
+	auto vkGetSemaphoreWin32HandleKHR = PFN_vkGetSemaphoreWin32HandleKHR(vkGetDeviceProcAddr(device, "vkGetSemaphoreWin32HandleKHR"));
+
 	for (uint32_t i = 0; i < offscreenImages.size(); i++)
 	{
 		VkExternalMemoryImageCreateInfo extImg{
@@ -3205,9 +3212,6 @@ void VulkanExampleBase::setupFrameBuffer()
 
 		// Step 2: Export the memory handle
 
-		auto vkGetMemoryWin32HandleKHR = PFN_vkGetMemoryWin32HandleKHR(vkGetDeviceProcAddr(device, "vkGetMemoryWin32HandleKHR"));
-		auto vkGetSemaphoreWin32HandleKHR = PFN_vkGetSemaphoreWin32HandleKHR(vkGetDeviceProcAddr(device, "vkGetSemaphoreWin32HandleKHR"));
-
 		HANDLE hMem = nullptr;
 		VkMemoryGetWin32HandleInfoKHR getH{
 		  .sType = VK_STRUCTURE_TYPE_MEMORY_GET_WIN32_HANDLE_INFO_KHR,
@@ -3224,8 +3228,26 @@ void VulkanExampleBase::setupFrameBuffer()
 		};
 		VK_CHECK_RESULT(vkGetSemaphoreWin32HandleKHR(device, &semGet, &hSem));
 
-		CloseHandle(hMem);
-		CloseHandle(hSem);
+		auto& cudaImportPack = cudaExportPackets[i];
+		cudaImportPack.version = CUDA_IMPORT_PACK_VERSION;
+		cudaImportPack.width = width;
+		cudaImportPack.height = height;
+		cudaImportPack.vk_format = (uint32_t)imageCI.format;
+
+		cudaImportPack.alloc_size = memReqs.size;
+		cudaImportPack.alloc_offset = 0;
+		cudaImportPack.dedicated = 1;
+
+#ifdef _WIN32
+		cudaImportPack.memory_handle = hMem;
+		cudaImportPack.semaphore_handle = hSem;
+#else
+		p.memory_fd = memFd;
+		p.semaphore_fd = semFd;
+#endif
+		cudaImportPack.semaphore_is_timeline = 0;
+
+
 	}
 
 	// Create frame buffers for every swap chain image, only one depth/stencil attachment is required, as this is owned by the application

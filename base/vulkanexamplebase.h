@@ -72,8 +72,10 @@
 #include "VulkanInitializers.hpp"
 #include "camera.hpp"
 #include "benchmark.hpp"
+#include "interop_cuda_pack.h"
 
 constexpr uint32_t maxConcurrentFrames{ 2 };
+
 
 class VulkanExampleBase
 {
@@ -149,6 +151,7 @@ protected:
 	std::vector<VkImage> offscreenImages{};
 	std::vector<VkImageView> offscreenImageViews{};
 	std::vector<VkDeviceMemory> offscreenImageMemories{};
+	std::vector<CudaImportPack> cudaExportPackets{};
 
 	// Synchronization related objects and variables
 	// These are used to have multiple frame buffers "in flight" to get some CPU/GPU parallelism

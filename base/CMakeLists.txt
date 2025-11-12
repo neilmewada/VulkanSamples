@@ -1,7 +1,7 @@
 # Copyright (c) 2016-2025, Sascha Willems
 # SPDX-License-Identifier: MIT
 
-file(GLOB BASE_SRC "*.cpp" "*.hpp" "*.h" "../external/imgui/*.cpp")
+file(GLOB BASE_SRC "*.cpp" "*.hpp" "*.h" "../external/imgui/*.cpp" "*.cu")
 file(GLOB BASE_HEADERS "*.hpp" "*.h")
 
 set(KTX_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../external/ktx)
