@@ -145,6 +145,10 @@ protected:
 	// Wraps the swap chain to present images (framebuffers) to the windowing system
 	VulkanSwapChain swapChain;
 
+	std::vector<VkImage> offscreenImages{};
+	std::vector<VkImageView> offscreenImageViews{};
+	std::vector<VkDeviceMemory> offscreenImageMemories{};
+
 	// Synchronization related objects and variables
 	// These are used to have multiple frame buffers "in flight" to get some CPU/GPU parallelism
 	uint32_t currentImageIndex{ 0 };
