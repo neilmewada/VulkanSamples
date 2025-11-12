@@ -52,6 +52,10 @@ VkResult VulkanExampleBase::createInstance()
 	instanceExtensions.push_back(VK_QNX_SCREEN_SURFACE_EXTENSION_NAME);
 #endif
 
+	instanceExtensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+	instanceExtensions.push_back(VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME);
+	instanceExtensions.push_back(VK_KHR_EXTERNAL_SEMAPHORE_CAPABILITIES_EXTENSION_NAME);
+
 	// Get extensions supported by the instance and store for later use
 	uint32_t extCount = 0;
 	vkEnumerateInstanceExtensionProperties(nullptr, &extCount, nullptr);
@@ -90,6 +94,7 @@ VkResult VulkanExampleBase::createInstance()
 	}
 
 	enabledDeviceExtensions.push_back(VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME);
+	//enabledDeviceExtensions.push_back(VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME);
 	enabledDeviceExtensions.push_back(VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME);
 #if (_WIN32)
 	enabledDeviceExtensions.push_back(VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME);
@@ -208,11 +213,15 @@ void VulkanExampleBase::createCommandBuffers()
 		.commandBufferCount = static_cast<uint32_t>(drawCmdBuffers.size()),
 	};
 	VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, drawCmdBuffers.data()));
+
+	cmdBufAllocateInfo.commandBufferCount = transferCmdBuffers.size();
+	VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, transferCmdBuffers.data()));
 }
 
 void VulkanExampleBase::destroyCommandBuffers()
 {
 	vkFreeCommandBuffers(device, cmdPool, static_cast<uint32_t>(drawCmdBuffers.size()), drawCmdBuffers.data());
+	vkFreeCommandBuffers(device, cmdPool, static_cast<uint32_t>(transferCmdBuffers.size()), transferCmdBuffers.data());
 }
 
 std::string VulkanExampleBase::getShadersPath() const
@@ -726,14 +735,78 @@ void VulkanExampleBase::prepareFrame(bool waitForFence)
 void VulkanExampleBase::submitFrame(bool skipQueueSubmit)
 {
 	if (!skipQueueSubmit) {
+
+		VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
+
+		vkBeginCommandBuffer(transferCmdBuffers[currentBuffer], &cmdBufInfo);
+		{
+			VkImageMemoryBarrier imageBarrier{};
+			imageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+			imageBarrier.image = swapChain.images[currentImageIndex];
+			imageBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+			imageBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+			imageBarrier.srcAccessMask = 0;
+			imageBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT;
+			imageBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			imageBarrier.subresourceRange.levelCount = 1;
+			imageBarrier.subresourceRange.layerCount = 1;
+			imageBarrier.subresourceRange.baseMipLevel = 0;
+			imageBarrier.subresourceRange.baseArrayLayer = 0;
+
+			vkCmdPipelineBarrier(transferCmdBuffers[currentBuffer],
+				VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+				VK_PIPELINE_STAGE_TRANSFER_BIT,
+				VK_DEPENDENCY_BY_REGION_BIT,
+				0, nullptr,
+				0, nullptr,
+				1, &imageBarrier);
+
+			VkImageCopy imageCopyRegion{};
+			imageCopyRegion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			imageCopyRegion.srcSubresource.layerCount = 1;
+			imageCopyRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			imageCopyRegion.dstSubresource.layerCount = 1;
+			imageCopyRegion.extent.width = width;
+			imageCopyRegion.extent.height = height;
+			imageCopyRegion.extent.depth = 1;
+
+			vkCmdCopyImage(
+				transferCmdBuffers[currentBuffer],
+				offscreenImages[currentImageIndex],
+				VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+				swapChain.images[currentImageIndex],
+				VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+				1,
+				&imageCopyRegion);
+
+			imageBarrier.image = swapChain.images[currentImageIndex];
+			imageBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+			imageBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+			imageBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT;
+			imageBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+			imageBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			imageBarrier.subresourceRange.levelCount = 1;
+
+			vkCmdPipelineBarrier(transferCmdBuffers[currentBuffer],
+				VK_PIPELINE_STAGE_TRANSFER_BIT,
+				VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+				VK_DEPENDENCY_BY_REGION_BIT,
+				0, nullptr,
+				0, nullptr,
+				1, &imageBarrier);
+		}
+		vkEndCommandBuffer(transferCmdBuffers[currentBuffer]);
+
+		VkCommandBuffer submitBuffers[2] = { drawCmdBuffers[currentBuffer], transferCmdBuffers[currentBuffer] };
+
 		const VkPipelineStageFlags waitPipelineStage{ VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
 		VkSubmitInfo submitInfo{
 			.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
 			.waitSemaphoreCount = 1,
 			.pWaitSemaphores = &presentCompleteSemaphores[currentBuffer],
 			.pWaitDstStageMask = &waitPipelineStage,
-			.commandBufferCount = 1,
-			.pCommandBuffers = &drawCmdBuffers[currentBuffer],
+			.commandBufferCount = 2,
+			.pCommandBuffers = submitBuffers,
 			.signalSemaphoreCount = 1,
 			.pSignalSemaphores = &renderCompleteSemaphores[currentImageIndex]
 		};
@@ -767,7 +840,7 @@ VulkanExampleBase::VulkanExampleBase()
 {
 	// Command line arguments
 	commandLineParser.add("help", { "--help" }, 0, "Show help");
-	commandLineParser.add("validation", { "-v", "--validation" }, 0, "Enable validation layers");
+	commandLineParser.add("validation", { "-v", "--validation" }, 1, "Enable validation layers");
 	commandLineParser.add("validationlogfile", { "-vl", "--validationlogfile" }, 0, "Log validation messages to a textfile");
 	commandLineParser.add("vsync", { "-vs", "--vsync" }, 0, "Enable V-Sync");
 	commandLineParser.add("fullscreen", { "-f", "--fullscreen" }, 0, "Start in fullscreen mode");
@@ -794,7 +867,8 @@ VulkanExampleBase::VulkanExampleBase()
 		std::cin.get();
 		exit(0);
 	}
-	if (commandLineParser.isSet("validation")) {
+	//if (commandLineParser.isSet("validation")) 
+	{
 		settings.validation = true;
 	}
 	if (commandLineParser.isSet("validationlogfile")) {
@@ -2966,6 +3040,22 @@ void VulkanExampleBase::createSynchronizationPrimitives()
 		VkSemaphoreCreateInfo semaphoreCI{ .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
 		VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCI, nullptr, &semaphore));
 	}
+
+	VkExportSemaphoreCreateInfo semExport{
+	  .sType = VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO,
+	  .handleTypes =
+	#if _WIN32
+		VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT
+	#else
+		VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT
+	#endif
+	};
+
+	exportSemaphores.resize(swapChain.images.size());
+	for (auto& semaphore : exportSemaphores) {
+		VkSemaphoreCreateInfo semaphoreCI{ .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &semExport };
+		VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCI, nullptr, &semaphore));
+	}
 }
 
 void VulkanExampleBase::createCommandPool()
@@ -3025,22 +3115,6 @@ void VulkanExampleBase::setupDepthStencil()
 
 void VulkanExampleBase::setupFrameBuffer()
 {
-	// Create frame buffers for every swap chain image, only one depth/stencil attachment is required, as this is owned by the application
-	frameBuffers.resize(swapChain.images.size());
-	for (uint32_t i = 0; i < frameBuffers.size(); i++) {
-		const VkImageView attachments[2] = { swapChain.imageViews[i], depthStencil.view };
-		VkFramebufferCreateInfo frameBufferCreateInfo{
-			.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
-			.renderPass = renderPass,
-			.attachmentCount = 2,
-			.pAttachments = attachments,
-			.width = width,
-			.height = height,
-			.layers = 1
-		};
-		VK_CHECK_RESULT(vkCreateFramebuffer(device, &frameBufferCreateInfo, nullptr, &frameBuffers[i]));
-	}
-
 	// Offscreen framebuffers
 
 	VkExternalMemoryImageCreateInfo extImg{
@@ -3053,13 +3127,25 @@ void VulkanExampleBase::setupFrameBuffer()
 #endif
 	};
 
+	// Step 1: Create offscreen images with exportable memory
+
 	offscreenImages.resize(swapChain.images.size());
 	offscreenImageViews.resize(swapChain.images.size());
 	offscreenImageMemories.resize(swapChain.images.size());
 	for (uint32_t i = 0; i < offscreenImages.size(); i++)
 	{
+		VkExternalMemoryImageCreateInfo extImg{
+		  .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,
+#if defined(_WIN32)
+			.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT
+#else
+			.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT
+#endif
+		};
+
 		VkImageCreateInfo imageCI{
 			.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+			.pNext = &extImg,
 			.imageType = VK_IMAGE_TYPE_2D,
 			.format = swapChain.colorFormat,
 			.extent = { width, height, 1 },
@@ -3067,7 +3153,7 @@ void VulkanExampleBase::setupFrameBuffer()
 			.arrayLayers = 1,
 			.samples = VK_SAMPLE_COUNT_1_BIT,
 			.tiling = VK_IMAGE_TILING_OPTIMAL,
-			.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+			.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
 		};
 		VK_CHECK_RESULT(vkCreateImage(device, &imageCI, nullptr, &offscreenImages[i]));
 
@@ -3116,6 +3202,47 @@ void VulkanExampleBase::setupFrameBuffer()
 			}
 		};
 		VK_CHECK_RESULT(vkCreateImageView(device, &imageViewCI, nullptr, &offscreenImageViews[i]));
+
+		// Step 2: Export the memory handle
+
+		auto vkGetMemoryWin32HandleKHR = PFN_vkGetMemoryWin32HandleKHR(vkGetDeviceProcAddr(device, "vkGetMemoryWin32HandleKHR"));
+		auto vkGetSemaphoreWin32HandleKHR = PFN_vkGetSemaphoreWin32HandleKHR(vkGetDeviceProcAddr(device, "vkGetSemaphoreWin32HandleKHR"));
+
+		HANDLE hMem = nullptr;
+		VkMemoryGetWin32HandleInfoKHR getH{
+		  .sType = VK_STRUCTURE_TYPE_MEMORY_GET_WIN32_HANDLE_INFO_KHR,
+		  .memory = offscreenImageMemories[i],
+		  .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT
+		};
+		VK_CHECK_RESULT(vkGetMemoryWin32HandleKHR(device, &getH, &hMem));
+		
+		HANDLE hSem = nullptr;
+		VkSemaphoreGetWin32HandleInfoKHR semGet{
+		  .sType = VK_STRUCTURE_TYPE_SEMAPHORE_GET_WIN32_HANDLE_INFO_KHR,
+		  .semaphore = exportSemaphores[i],
+		  .handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT
+		};
+		VK_CHECK_RESULT(vkGetSemaphoreWin32HandleKHR(device, &semGet, &hSem));
+
+		CloseHandle(hMem);
+		CloseHandle(hSem);
+	}
+
+	// Create frame buffers for every swap chain image, only one depth/stencil attachment is required, as this is owned by the application
+	frameBuffers.resize(swapChain.images.size());
+	for (uint32_t i = 0; i < frameBuffers.size(); i++) {
+		//const VkImageView attachments[2] = { swapChain.imageViews[i], depthStencil.view };
+		const VkImageView attachments[2] = { offscreenImageViews[i], depthStencil.view };
+		VkFramebufferCreateInfo frameBufferCreateInfo{
+			.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+			.renderPass = renderPass,
+			.attachmentCount = 2,
+			.pAttachments = attachments,
+			.width = width,
+			.height = height,
+			.layers = 1
+		};
+		VK_CHECK_RESULT(vkCreateFramebuffer(device, &frameBufferCreateInfo, nullptr, &frameBuffers[i]));
 	}
 }
 
@@ -3131,7 +3258,7 @@ void VulkanExampleBase::setupRenderPass()
 			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
 			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-			.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
+			.finalLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL//VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
 		},
 		// Depth attachment
 		VkAttachmentDescription{

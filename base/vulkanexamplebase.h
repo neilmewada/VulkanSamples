@@ -132,6 +132,7 @@ protected:
 	VkCommandPool cmdPool{ VK_NULL_HANDLE };
 	// Command buffers used for rendering
 	std::array<VkCommandBuffer, maxConcurrentFrames> drawCmdBuffers;
+	std::array<VkCommandBuffer, maxConcurrentFrames> transferCmdBuffers;
 	// Global render pass for frame buffer writes
 	VkRenderPass renderPass{ VK_NULL_HANDLE };
 	// List of available frame buffers (same as number of swap chain images)
@@ -155,6 +156,7 @@ protected:
 	uint32_t currentBuffer{ 0 };
 	std::array<VkSemaphore, maxConcurrentFrames> presentCompleteSemaphores{};
 	std::vector<VkSemaphore> renderCompleteSemaphores{};
+	std::vector<VkSemaphore> exportSemaphores{};
 	std::array<VkFence, maxConcurrentFrames> waitFences;
 
 	bool requiresStencil{ false };
