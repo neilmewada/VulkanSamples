@@ -34,3 +34,14 @@ struct CudaImportPack {
   uint8_t  semaphore_is_timeline; // 1 = timeline, 0 = binary
   uint8_t  reserved2_[7];         // padding
 };
+
+extern "C" void cuda_interop_init();
+extern "C" void cuda_interop_shutdown();
+extern "C" void cuda_interop_sync();
+
+extern "C" void cuda_interop_import_all(const CudaImportPack* packs, int count);
+extern "C" void cuda_interop_destroy_all();
+
+extern "C" bool cuda_interop_alloc_nv12_all();
+extern "C" void cuda_interop_free_nv12_all();
+extern "C" void cuda_interop_convert_bgra_to_nv12(int slotIndex);

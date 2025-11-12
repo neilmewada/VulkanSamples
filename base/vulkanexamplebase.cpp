@@ -834,6 +834,14 @@ void VulkanExampleBase::submitFrame(bool skipQueueSubmit)
 	else {
 		VK_CHECK_RESULT(result);
 	}
+
+	if (result == VK_SUCCESS)
+	{
+		const int slot = currentImageIndex;
+		cuda_interop_convert_bgra_to_nv12(slot);
+		cuda_interop_sync();
+	}
+
 	// Select the next frame to render to, based on the max. no. of concurrent frames
 	currentBuffer = (currentBuffer + 1) % maxConcurrentFrames;
 }
@@ -995,6 +1003,8 @@ VulkanExampleBase::VulkanExampleBase()
 	}
 	setupDPIAwareness();
 #endif
+
+	cuda_interop_init();
 }
 
 VulkanExampleBase::~VulkanExampleBase()
@@ -1014,6 +1024,11 @@ VulkanExampleBase::~VulkanExampleBase()
 	for (auto& shaderModule : shaderModules) {
 		vkDestroyShaderModule(device, shaderModule, nullptr);
 	}
+
+	cuda_interop_destroy_all();
+	cuda_interop_free_nv12_all();
+	cuda_interop_shutdown();
+
 	vkDestroyImageView(device, depthStencil.view, nullptr);
 	vkDestroyImage(device, depthStencil.image, nullptr);
 	vkFreeMemory(device, depthStencil.memory, nullptr);
@@ -3246,9 +3261,10 @@ void VulkanExampleBase::setupFrameBuffer()
 		p.semaphore_fd = semFd;
 #endif
 		cudaImportPack.semaphore_is_timeline = 0;
-
-
 	}
+
+	cuda_interop_import_all(cudaExportPackets.data(), cudaExportPackets.size());
+	cuda_interop_alloc_nv12_all();
 
 	// Create frame buffers for every swap chain image, only one depth/stencil attachment is required, as this is owned by the application
 	frameBuffers.resize(swapChain.images.size());
